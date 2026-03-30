@@ -1,102 +1,82 @@
-# ingest.py
-# PURPOSE: Load PDFs → split into chunks → convert to numbers → save to database
-
-from glob import glob
-import os
+# Step 1: Import necessary libraries
+from pathlib import Path             # To handle file paths efficiently
+from langchain_community.document_loaders import PyPDFLoader, PyPDFDirectoryLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter  # Split large texts
+from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
-from langchain_community.document_loaders  import PyPDFLoader, DirectoryLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+import os
+import chromadb
+import numpy as np
 
-load_dotenv() 
+# Load environment variables (API keys, etc.)
+load_dotenv()
 
-# 1. Load PDF
+print("📂 Loading the PDF's...")
 
-def load_documents(data_dir="./data"):
+# Step 2: Define the path to your owner's manuals
+manuals_path = Path("data/owners_manual/")  # Folder containing all manuals (PDF, TXT, DOCX)
 
-    print(f"📂 Loading PDFs from '{data_dir}'...")
-    
-    loader = DirectoryLoader(
-        data_dir,
-        glob="**/*.pdf",          # This command loads all .pdf files
-        loader_cls=PyPDFLoader    # Use PDF-specific loader
-    )
-    docs = loader.load()
-    print(f"✅ Loaded {len(docs)} pages across all PDFs")
-    return docs
+# Step 3: Load documents from the directory
+if not manuals_path.exists():
+    print(f"⚠️  Warning: Directory {manuals_path} not found. Creating it...")
+    manuals_path.mkdir(parents=True, exist_ok=True)
 
-def split_into_chunks(docs):
-    """
-    Splits large documents into smaller chunks.
-    
-    Why chunk_size=700? 
-      - Too large (2000+): Less precise retrieval, expensive
-      - Too small (100):   Loses context, chunks are meaningless
-      - 700 is the sweet spot for most documents
-    
-    Why chunk_overlap=100?
-      - Prevents cutting a sentence right at the boundary
-      - Neighboring chunks share 100 characters, so no info is lost
-    """
-    print("✂️  Splitting documents into chunks...")
-    
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=700,
-        chunk_overlap=100,
-        # It tries to split at paragraph breaks first (\n\n),
-        # then line breaks (\n), then sentences (". "), then words
-        separators=["\n\n", "\n", ". ", " "]
-    )
-    
-    chunks = splitter.split_documents(docs)
-    print(f"✅ Created {len(chunks)} chunks")
-    
-    # Print a sample so you can SEE what a chunk looks like
-    print("\n" + "="*50)
-    print("SAMPLE CHUNK (so you understand the data):")
-    print("="*50)
-    print(f"Text: {chunks[0].page_content[:400]}")
-    print(f"Metadata: {chunks[0].metadata}")
-    print("="*50 + "\n")
-    
-    return chunks
+loader = PyPDFDirectoryLoader(str(manuals_path))
 
-def embed_and_store(chunks):
-    """
-    Converts each chunk's text into a list of numbers (embedding).
-    Similar text = similar numbers = can search by meaning.
-    
-    Example:
-      "refund policy" → [0.23, -0.11, 0.87, ...]  (768 numbers)
-      "money back guarantee" → [0.21, -0.09, 0.85, ...]  (very similar!)
-      "chocolate cake recipe" → [-0.45, 0.33, -0.12, ...]  (very different)
-    """
-    print("🔢 Converting chunks to embeddings...")
-    print("   (First time downloads a ~400MB model — be patient)")
-    
-    embedding_model = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-mpnet-base-v2"
-    )
-    
-    print("💾 Saving to ChromaDB vector database...")
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embedding_model,
-        persist_directory="./chroma_db",    # Saves to disk
-        collection_name="documind_docs"
-    )
-    vectorstore.persist()
-    
-    count = vectorstore._collection.count()
-    print(f"✅ Database ready! Contains {count} chunks")
-    return vectorstore
+# Step 4: Load all documents into memory
+documents = loader.load()  # Each document is now a LangChain Document object
 
+if not documents:
+    print("❌ No PDF documents found in 'data/owners_manual/'. Please add some PDFs and run again.")
+    exit()
 
-if __name__ == "__main__":
-    print("🚀 Starting AI Powered Vehicle Assistant ingestion pipeline...\n")
-    docs   = load_documents()
-    chunks = split_into_chunks(docs)
-    embed_and_store(chunks)
-    print("\n🎉 Done! Your documents are ingested and ready to search.")
-    print("   Next step: Run retrieval.py to test searching")
+print(f"✅ Loaded {len(documents)} pages.")
+
+print("✂️  Splitting the documents into chunks...")
+# Step 5: Split documents into smaller chunks for better retrieval
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=700,    # Max 700 characters per chunk
+    chunk_overlap=100   # Overlap 100 characters for context continuity
+)
+
+chunks = text_splitter.split_documents(documents)
+
+print(f"✅ Created {len(chunks)} chunks.")
+
+print("🔢 Creating embeddings...")
+# Step 7: Create embeddings
+# This model is small and fast for local use
+model = SentenceTransformer('all-MiniLM-L6-v2')
+texts = [chunk.page_content for chunk in chunks]
+embeddings = model.encode(texts, show_progress_bar=True)
+
+print("✅ Embeddings created successfully.")
+
+# -----------------------------
+# 3️⃣ Create local Chroma DB
+# -----------------------------
+print("💾 Saving to ChromaDB vector database...")
+# Using PersistentClient for modern ChromaDB (>= 0.4.0)
+client = chromadb.PersistentClient(path="./chroma_db")
+
+# Create or get a collection to store your embeddings
+collection_name = "documind_data"
+collection = client.get_or_create_collection(name=collection_name)
+
+# -----------------------------
+# 4️⃣ Add embeddings + metadata
+# -----------------------------
+# Prepare metadata and IDs
+metadatas = [chunk.metadata for chunk in chunks]
+ids = [str(i) for i in range(len(chunks))]
+
+collection.add(
+    documents=texts,
+    embeddings=embeddings.tolist(),  # Chroma expects a list
+    metadatas=metadatas,
+    ids=ids
+)
+
+print(f"✅ Data stored successfully in collection: '{collection_name}'")
+print("\n🎉 Done! Your documents are ingested and ready to search.")
+
