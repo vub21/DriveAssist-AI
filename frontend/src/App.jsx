@@ -29,6 +29,23 @@ const SendIcon = () => (
   </svg>
 )
 
+const TrashIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    <path d="M10 11v6M14 11v6" />
+    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+  </svg>
+)
+
+const UploadIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
+  </svg>
+)
+
 const SUGGESTIONS = [
   'How do I check the engine oil level?',
   'What does the tire pressure warning light mean?',
@@ -87,6 +104,78 @@ function Message({ msg }) {
   )
 }
 
+function ProgressModal({ filename, log, percent, status, onClose }) {
+  const logRef = useRef(null)
+  const isDone = status === 'done' || status === 'error'
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [log])
+
+  const title = {
+    uploading: 'Uploading Manual…',
+    ingesting: 'Training Manual…',
+    done: 'Manual Ready',
+    error: 'Something Went Wrong',
+  }[status] ?? 'Processing…'
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <div className="modal-header">
+          <p className="modal-title">{title}</p>
+          <p className="modal-filename">{filename}</p>
+        </div>
+
+        <div className="modal-log" ref={logRef}>
+          {status === 'uploading' && (
+            <div className="log-item active">
+              <span className="log-spinner" />
+              Uploading file…
+            </div>
+          )}
+          {log.map((msg, i) => {
+            const isLast = i === log.length - 1
+            const isActive = isLast && !isDone
+            return (
+              <div key={i} className={`log-item ${isActive ? 'active' : 'done'}`}>
+                {isActive
+                  ? <span className="log-spinner" />
+                  : <span className="log-check">✓</span>
+                }
+                {msg}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="modal-progress-row">
+          <div className="progress-track">
+            <div
+              className={`progress-fill ${status === 'error' ? 'error' : ''}`}
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+          <span className="progress-pct">{percent}%</span>
+        </div>
+
+        {status === 'done' && (
+          <p className="modal-success">Select the manual in the sidebar to start chatting.</p>
+        )}
+        {status === 'error' && (
+          <p className="modal-error-msg">Check the backend logs for details.</p>
+        )}
+
+        <div className="modal-footer">
+          <button className="modal-close-btn" onClick={onClose} disabled={!isDone}>
+            {isDone ? 'Close' : 'Processing…'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [models, setModels] = useState([])
   const [selectedModel, setSelectedModel] = useState(null)
@@ -97,6 +186,39 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
+
+  // Delete state
+  const [confirmDelete, setConfirmDelete] = useState(null) // filename pending delete
+
+  const handleDelete = async (filename) => {
+    try {
+      await fetch(`${API_BASE}/models/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+      setConfirmDelete(null)
+      const data = await fetch(`${API_BASE}/models`).then(r => r.json())
+      setModels(data.models)
+      if (selectedModel === filename) {
+        setSelectedModel(data.models[0] ?? null)
+        setMessages([])
+      }
+    } catch {
+      setConfirmDelete(null)
+    }
+  }
+
+  // Upload / ingest state
+  const [showModal, setShowModal] = useState(false)
+  const [uploadFilename, setUploadFilename] = useState('')
+  const [progressLog, setProgressLog] = useState([])
+  const [ingestPercent, setIngestPercent] = useState(0)
+  const [ingestStatus, setIngestStatus] = useState('idle')
+  const fileInputRef = useRef(null)
+  const eventSourceRef = useRef(null)
+
+  const refreshModels = () =>
+    fetch(`${API_BASE}/models`)
+      .then(r => r.json())
+      .then(data => setModels(data.models))
+      .catch(() => {})
 
   useEffect(() => {
     fetch(`${API_BASE}/models`)
@@ -142,7 +264,7 @@ export default function App() {
         content: data.answer,
         sources: data.sources,
       }])
-    } catch (e) {
+    } catch {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: 'Sorry, something went wrong. Please check that the backend server is running.',
@@ -164,6 +286,94 @@ export default function App() {
     setSelectedModel(m)
     setMessages([])
     setError(null)
+  }
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    e.target.value = ''
+
+    setUploadFilename(file.name)
+    setProgressLog([])
+    setIngestPercent(0)
+    setIngestStatus('uploading')
+    setShowModal(true)
+
+    try {
+      // 1. Upload the PDF
+      const form = new FormData()
+      form.append('file', file)
+      const uploadRes = await fetch(`${API_BASE}/upload`, { method: 'POST', body: form })
+      if (!uploadRes.ok) throw new Error('Upload failed.')
+      const { filename } = await uploadRes.json()
+
+      // 2. Kick off ingestion
+      setIngestStatus('ingesting')
+      const ingestRes = await fetch(`${API_BASE}/ingest/${encodeURIComponent(filename)}`, { method: 'POST' })
+      if (!ingestRes.ok) throw new Error('Failed to start ingestion.')
+      const { job_id } = await ingestRes.json()
+
+      // 3. Stream progress via SSE
+      const es = new EventSource(`${API_BASE}/ingest/progress/${job_id}`)
+      eventSourceRef.current = es
+
+      es.onmessage = (evt) => {
+        const msg = JSON.parse(evt.data)
+        if (msg.type === 'ping') return
+
+        if (msg.type === 'progress') {
+          setProgressLog(prev => [...prev, msg.message])
+          setIngestPercent(msg.percent)
+        }
+
+        if (msg.type === 'done') {
+          es.close()
+          eventSourceRef.current = null
+          if (msg.success) {
+            setIngestStatus('done')
+            setIngestPercent(100)
+            setProgressLog(prev => [...prev, msg.message])
+            refreshModels().then(() => {
+              setModels(prev => {
+                const match = prev.find(m => m === filename)
+                if (match) switchModel(match)
+                return prev
+              })
+            })
+            // Refresh and auto-select the new manual
+            fetch(`${API_BASE}/models`)
+              .then(r => r.json())
+              .then(data => {
+                setModels(data.models)
+                const match = data.models.find(m => m === filename)
+                if (match) switchModel(match)
+              })
+          } else {
+            setIngestStatus('error')
+            setProgressLog(prev => [...prev, `Error: ${msg.message}`])
+          }
+        }
+      }
+
+      es.onerror = () => {
+        es.close()
+        eventSourceRef.current = null
+        setIngestStatus('error')
+        setProgressLog(prev => [...prev, 'Connection to server lost.'])
+      }
+    } catch (err) {
+      setIngestStatus('error')
+      setProgressLog(prev => [...prev, `Error: ${err.message}`])
+    }
+  }
+
+  const closeModal = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+    setShowModal(false)
+    setIngestStatus('idle')
   }
 
   return (
@@ -190,19 +400,49 @@ export default function App() {
               <p className="section-label">Vehicle Manual</p>
               <div className="model-list">
                 {models.length === 0 && (
-                  <p className="no-models">No manuals loaded. Run ingest.py first.</p>
+                  <p className="no-models">No manuals loaded yet.</p>
                 )}
                 {models.map(m => (
-                  <button
-                    key={m}
-                    className={`model-btn ${selectedModel === m ? 'active' : ''}`}
-                    onClick={() => switchModel(m)}
-                  >
-                    <CarIcon />
-                    <span>{formatModelName(m)}</span>
-                  </button>
+                  confirmDelete === m ? (
+                    <div key={m} className="model-delete-confirm">
+                      <span>Delete {formatModelName(m)}?</span>
+                      <div className="delete-confirm-actions">
+                        <button className="delete-yes" onClick={() => handleDelete(m)}>Yes</button>
+                        <button className="delete-no" onClick={() => setConfirmDelete(null)}>No</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={m} className="model-row">
+                      <button
+                        className={`model-btn ${selectedModel === m ? 'active' : ''}`}
+                        onClick={() => switchModel(m)}
+                      >
+                        <CarIcon />
+                        <span>{formatModelName(m)}</span>
+                      </button>
+                      <button
+                        className="model-delete-btn"
+                        onClick={() => setConfirmDelete(m)}
+                        aria-label={`Delete ${formatModelName(m)}`}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </div>
+                  )
                 ))}
               </div>
+
+              <button className="upload-btn" onClick={() => fileInputRef.current?.click()}>
+                <UploadIcon />
+                <span>Upload New Manual</span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+              />
             </div>
 
             <div className="sidebar-footer">
@@ -214,7 +454,6 @@ export default function App() {
 
       {/* ── Main ── */}
       <main className="main">
-        {/* Header */}
         <header className="chat-header">
           <div className="header-info">
             <h1>Vehicle Assistant</h1>
@@ -229,12 +468,8 @@ export default function App() {
           )}
         </header>
 
-        {/* Error banner */}
-        {error && (
-          <div className="error-banner">{error}</div>
-        )}
+        {error && <div className="error-banner">{error}</div>}
 
-        {/* Messages */}
         <div className="messages-container">
           {messages.length === 0 && !loading && (
             <div className="empty-state">
@@ -264,7 +499,6 @@ export default function App() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
         <div className="input-row">
           <div className="input-box">
             <textarea
@@ -288,6 +522,17 @@ export default function App() {
           <p className="input-hint">Press Enter to send &middot; Shift+Enter for new line</p>
         </div>
       </main>
+
+      {/* ── Upload Progress Modal ── */}
+      {showModal && (
+        <ProgressModal
+          filename={uploadFilename}
+          log={progressLog}
+          percent={ingestPercent}
+          status={ingestStatus}
+          onClose={closeModal}
+        />
+      )}
     </div>
   )
 }

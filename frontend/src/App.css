@@ -496,6 +496,281 @@
   margin-right: auto;
 }
 
+/* ─── Model row with delete ─────────────────────────────── */
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 10px;
+}
+
+.model-row .model-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-delete-btn {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: #3a3a52;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.model-row:hover .model-delete-btn {
+  opacity: 1;
+}
+
+.model-delete-btn:hover {
+  color: #e05555;
+  background: rgba(224, 85, 85, 0.1);
+}
+
+.model-delete-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.model-delete-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(224, 85, 85, 0.08);
+  border: 1px solid rgba(224, 85, 85, 0.2);
+  font-size: 12.5px;
+  color: #e08080;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.delete-yes {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #e05555;
+  color: #fff;
+  transition: background 0.15s;
+}
+
+.delete-yes:hover { background: #f06060; }
+
+.delete-no {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #6868a0;
+  border: 1px solid #2a2a3a;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.delete-no:hover { color: #e0e0e6; border-color: #3a3a50; }
+
+/* ─── Upload button ────────────────────────────────────── */
+.upload-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed #2a2a3a;
+  color: #6868a0;
+  font-size: 13.5px;
+  text-align: left;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.upload-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.upload-btn:hover {
+  background: #1a1a26;
+  color: #f5a623;
+  border-color: rgba(245, 166, 35, 0.35);
+}
+
+/* ─── Progress modal ────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  background: #13131a;
+  border: 1px solid #2a2a3a;
+  border-radius: 16px;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid #1e1e2a;
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #e8e8f0;
+}
+
+.modal-filename {
+  font-size: 12px;
+  color: #5a5a78;
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-log {
+  padding: 16px 22px;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-log::-webkit-scrollbar { width: 4px; }
+.modal-log::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 2px; }
+
+.log-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #5a5a78;
+}
+
+.log-item.done {
+  color: #7070a0;
+}
+
+.log-item.active {
+  color: #e0e0e6;
+}
+
+.log-check {
+  font-size: 12px;
+  color: #4caf82;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.log-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #2a2a3a;
+  border-top-color: #f5a623;
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.modal-progress-row {
+  padding: 4px 22px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.progress-track {
+  flex: 1;
+  height: 5px;
+  background: #1e1e2a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #f5a623;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.progress-fill.error {
+  background: #e05555;
+}
+
+.progress-pct {
+  font-size: 11.5px;
+  color: #5a5a78;
+  width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.modal-success {
+  font-size: 12.5px;
+  color: #4caf82;
+  padding: 0 22px 12px;
+}
+
+.modal-error-msg {
+  font-size: 12.5px;
+  color: #e08080;
+  padding: 0 22px 12px;
+}
+
+.modal-footer {
+  padding: 14px 22px;
+  border-top: 1px solid #1e1e2a;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.modal-close-btn {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  background: #f5a623;
+  color: #1a0e00;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.modal-close-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: #2a2a3a;
+  color: #5a5a78;
+}
+
+.modal-close-btn:not(:disabled):hover {
+  background: #ffc04a;
+}
+
 /* ─── Responsive ───────────────────────────────────────── */
 @media (max-width: 640px) {
   .sidebar.open { width: 220px; }
